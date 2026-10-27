@@ -13,8 +13,12 @@
 1. Create a new public GitHub Gist (https://gist.github.com/new)
 2. Create a GitHub token with an expiration date and copy it (https://github.com/settings/tokens)
 
-    - **Classic PAT:** `gist` is required. Add `repo` only if you need to count commits in private repositories.
-    - **Fine-grained PAT:** Gists **Read and write**. Grant repository access only if you need private commit counts.
+    - **Classic PAT:** `gist` is required. Add `repo` only if you need to count commits in private repositories (`ALL_COMMITS=true` uses the commit search API).
+    - **Fine-grained PAT:** Resource owner = your user. Repository access = **All repositories**. Repository permission = **Metadata: Read-only**. Account permission = **Gists: Read and write**.
+      - Public repo metadata is included. Private stars/commits are only included for repositories this token can actually read.
+      - GraphQL may return `null` repository nodes plus an `errors` array for inaccessible repos or fields; those nodes are skipped and the action logs `type` / `path` / `message` only.
+      - A user-owned token cannot count organization-owned repositories (this query uses `ownerAffiliations: OWNER`).
+      - Commit search often does not work with fine-grained tokens. If `ALL_COMMITS=true` and search is forbidden, the gist uses last-year GraphQL totals and labels the line **Past Year Commits** instead of failing.
 
 ## Project setup
 

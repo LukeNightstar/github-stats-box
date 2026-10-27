@@ -2,7 +2,8 @@
 'use strict';
 
 require('dotenv').config();
-const { userInfoFetcher, totalCommitsFetcher, githubRequest } = require('./fetch');
+const { userInfoFetcher, totalCommitsFetcher, githubRequest, isRetryableFailure, describeError } = require('./fetch');
+const { statsFromViewer, formatGraphqlErrors, viewerFromPayload, NonRetryableError } = require('./stats');
 const numeral = require('numeral');
 
 const gistId = process.env.GIST_ID;
@@ -20,41 +21,65 @@ async function main() {
         console.info('Successfully fetched statistics from GitHub');
         console.info(JSON.stringify(stats, null, 2));
     } catch (e) {
-        throw new Error(`cannot retrieve statistics: ${e.message}`);
+        const wrapped = new Error(`cannot retrieve statistics: ${e.message}`);
+        wrapped.cause = e;
+        throw wrapped;
     }
     try {
         await updateGist(stats);
     } catch (e) {
-        throw new Error(`cannot update gist: ${e.message}`);
+        const wrapped = new Error(`cannot update gist: ${e.message}`);
+        wrapped.cause = e;
+        throw wrapped;
     }
 }
 
 async function getStats() {
-    const stats = {
-        name: '',
-        totalPRs: 0,
-        totalCommits: 0,
-        totalIssues: 0,
-        totalStars: 0,
-        contributedTo: 0,
-    };
-
-    const user = await userInfoFetcher(githubToken).then((res) => res.data.data.viewer);
-
-    stats.name = user.name || user.login;
-    stats.totalPRs = user.pullRequests.totalCount;
-    stats.totalIssues = user.issues.totalCount;
-    stats.contributedTo = user.repositoriesContributedTo.totalCount;
-    stats.totalStars = user.repositories.nodes.reduce((prev, curr) => {
-        return prev + curr.stargazers.totalCount;
-    }, 0);
-
-    stats.totalCommits = user.contributionsCollection.totalCommitContributions;
-    if (countAllCommits) {
-        stats.totalCommits = await totalCommitsFetcher(user.login, githubToken);
+    const response = await userInfoFetcher(githubToken);
+    const payload = response && response.data;
+    const graphqlErrors = formatGraphqlErrors(payload && payload.errors);
+    if (graphqlErrors.length) {
+        console.info('GraphQL returned partial errors:');
+        for (const line of graphqlErrors) {
+            console.info(`- ${line}`);
+        }
     }
 
-    return stats;
+    const viewer = viewerFromPayload(payload);
+    const stats = statsFromViewer(viewer);
+    if (stats.skippedRepos > 0) {
+        console.info(`Skipped ${stats.skippedRepos} inaccessible repository node(s) when summing stars`);
+    }
+
+    let commitsAreAllTime = false;
+    if (countAllCommits) {
+        if (!stats.login) {
+            console.info('commit search skipped: viewer login is missing');
+        } else {
+            try {
+                stats.totalCommits = await totalCommitsFetcher(stats.login, githubToken);
+                commitsAreAllTime = true;
+            } catch (error) {
+                if (isRetryableFailure(error)) {
+                    throw error;
+                }
+                console.info(
+                    `commit search unavailable (${describeError(error)}); using contributionsCollection total`
+                );
+            }
+        }
+    }
+
+    return {
+        name: stats.name,
+        totalPRs: stats.totalPRs,
+        totalCommits: stats.totalCommits,
+        totalIssues: stats.totalIssues,
+        totalStars: stats.totalStars,
+        contributedTo: stats.contributedTo,
+        skippedRepos: stats.skippedRepos,
+        commitsAreAllTime,
+    };
 }
 
 async function updateGist(stats) {
@@ -63,7 +88,7 @@ async function updateGist(stats) {
     const gistContent =
         [
             ['⭐', `Total Stars`, humanize(stats.totalStars)],
-            ['➕', countAllCommits ? 'Total Commits' : 'Past Year Commits', humanize(stats.totalCommits)],
+            ['➕', stats.commitsAreAllTime ? 'Total Commits' : 'Past Year Commits', humanize(stats.totalCommits)],
             ['🔀', `Total PRs`, humanize(stats.totalPRs)],
             ['🚩', `Total Issues`, humanize(stats.totalIssues)],
             ['📦', `Contributed to`, humanize(stats.contributedTo)],
@@ -84,9 +109,17 @@ async function updateGist(stats) {
         },
         githubToken
     );
-    const filename = Object.keys(gist.data.files)[0];
+    const files = gist.data && gist.data.files;
+    if (!files || typeof files !== 'object') {
+        throw new NonRetryableError('gist has no files');
+    }
+    const filename = Object.keys(files)[0];
+    const gistFile = filename && files[filename];
+    if (!gistFile) {
+        throw new NonRetryableError('gist has no files');
+    }
 
-    if (gist.data.files[filename].content === gistContent) {
+    if (gistFile.content === gistContent) {
         console.info('Nothing to update');
         return;
     }
@@ -113,5 +146,5 @@ async function updateGist(stats) {
 
 main().catch((err) => {
     console.error(err.message);
-    process.exit(1);
+    process.exit(isRetryableFailure(err) ? 2 : 1);
 });
