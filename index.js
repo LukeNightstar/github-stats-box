@@ -2,14 +2,13 @@
 'use strict';
 
 require('dotenv').config();
-const { request } = require('@octokit/request');
-const { userInfoFetcher, totalCommitsFetcher } = require('./fetch');
+const { userInfoFetcher, totalCommitsFetcher, githubRequest } = require('./fetch');
 const numeral = require('numeral');
 
 const gistId = process.env.GIST_ID;
 const githubToken = process.env.GH_TOKEN;
-const countAllCommits = process.env.ALL_COMMITS.toString() === 'true';
-const kFormat = process.env.K_FORMAT.toString() === 'true';
+const countAllCommits = String(process.env.ALL_COMMITS) === 'true';
+const kFormat = String(process.env.K_FORMAT) === 'true';
 
 async function main() {
     if (!githubToken) {
@@ -77,10 +76,14 @@ async function updateGist(stats) {
             })
             .join('\n') + '\n';
 
-    const gist = await request('GET /gists/:gist_id', {
-        gist_id: gistId,
-        headers: { authorization: `token ${githubToken}` },
-    });
+    const gist = await githubRequest(
+        {
+            method: 'get',
+            url: `https://api.github.com/gists/${gistId}`,
+            headers: { Accept: 'application/vnd.github+json' },
+        },
+        githubToken
+    );
     const filename = Object.keys(gist.data.files)[0];
 
     if (gist.data.files[filename].content === gistContent) {
@@ -88,16 +91,22 @@ async function updateGist(stats) {
         return;
     }
 
-    return request('PATCH /gists/:gist_id', {
-        files: {
-            [filename]: {
-                filename: `${stats.name}'s GitHub Stats`,
-                content: gistContent,
+    return githubRequest(
+        {
+            method: 'patch',
+            url: `https://api.github.com/gists/${gistId}`,
+            headers: { Accept: 'application/vnd.github+json' },
+            data: {
+                files: {
+                    [filename]: {
+                        filename: `${stats.name}'s GitHub Stats`,
+                        content: gistContent,
+                    },
+                },
             },
         },
-        gist_id: gistId,
-        headers: { authorization: `token ${githubToken}` },
-    }).then(() => {
+        githubToken
+    ).then(() => {
         console.info(`Updated Gist ${gistId} with the following content:\n${gistContent}`);
     });
 }
