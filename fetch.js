@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { NonRetryableError } = require('./stats');
 
 const MAX_ATTEMPTS = 3;
 const TIMEOUT_MS = 30000;
@@ -28,11 +29,30 @@ function describeError(error) {
 }
 
 function isRetryable(error) {
+    if (!error) {
+        return false;
+    }
     const status = error.response && error.response.status;
     if (status && RETRYABLE_STATUS.has(status)) {
         return true;
     }
     return Boolean(error.code && RETRYABLE_CODES.has(error.code));
+}
+
+function isRetryableFailure(error) {
+    const seen = new Set();
+    let current = error;
+    while (current && typeof current === 'object' && !seen.has(current)) {
+        seen.add(current);
+        if (current instanceof NonRetryableError || current.retryable === false) {
+            return false;
+        }
+        if (current.retryable === true || isRetryable(current)) {
+            return true;
+        }
+        current = current.cause;
+    }
+    return false;
 }
 
 async function withRetry(task, label) {
@@ -123,6 +143,7 @@ const userInfoFetcher = (token) => {
                   repositories(first: 100, ownerAffiliations: OWNER, isFork: false, orderBy: {direction: DESC, field: STARGAZERS}) {
                     totalCount
                     nodes {
+                      stargazerCount
                       stargazers {
                         totalCount
                       }
@@ -155,4 +176,6 @@ module.exports = {
     userInfoFetcher,
     totalCommitsFetcher,
     githubRequest,
+    describeError,
+    isRetryableFailure,
 };
