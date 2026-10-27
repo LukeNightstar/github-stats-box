@@ -89,27 +89,42 @@ function viewerFromPayload(payload) {
     throw new NonRetryableError('GraphQL viewer is missing');
 }
 
-function formatGraphqlErrors(errors, { limit = 25 } = {}) {
+function generalizePath(path) {
+    if (!Array.isArray(path)) {
+        return '';
+    }
+    return path
+        .filter((part) => typeof part === 'string' || typeof part === 'number')
+        .map((part) => (typeof part === 'number' ? 'N' : part))
+        .join('.');
+}
+
+function formatGraphqlErrors(errors, { limit = 10 } = {}) {
     if (!Array.isArray(errors) || errors.length === 0) {
         return [];
     }
 
-    const lines = errors.slice(0, limit).map((err) => {
+    const groups = new Map();
+    for (const err of errors) {
+        let key;
         if (!err || typeof err !== 'object') {
-            return 'unknown GraphQL error';
+            key = 'unknown GraphQL error';
+        } else {
+            const type = typeof err.type === 'string' ? err.type : '';
+            const message = safeGraphqlMessage(err.message);
+            const path = generalizePath(err.path);
+            key = [type, path, message].filter(Boolean).join(': ');
         }
-        const type = typeof err.type === 'string' ? err.type : '';
-        const message = safeGraphqlMessage(err.message);
-        const path = Array.isArray(err.path)
-            ? err.path.filter((part) => typeof part === 'string' || typeof part === 'number').join('.')
-            : '';
-        return [type, path, message].filter(Boolean).join(': ');
-    });
-
-    if (errors.length > limit) {
-        lines.push(`… ${errors.length - limit} more`);
+        groups.set(key, (groups.get(key) || 0) + 1);
     }
 
+    const entries = [...groups.entries()];
+    const lines = entries.slice(0, limit).map(([key, count]) => (count > 1 ? `${key} (x${count})` : key));
+    const remainingGroups = entries.length - lines.length;
+    if (remainingGroups > 0) {
+        const remainingErrors = entries.slice(limit).reduce((sum, [, count]) => sum + count, 0);
+        lines.push(`… ${remainingGroups} more group(s) (${remainingErrors} error(s))`);
+    }
     return lines;
 }
 

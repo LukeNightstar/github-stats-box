@@ -13,12 +13,33 @@
 1. Create a new public GitHub Gist (https://gist.github.com/new)
 2. Create a GitHub token with an expiration date and copy it (https://github.com/settings/tokens)
 
-    - **Classic PAT:** `gist` is required. Add `repo` only if you need to count commits in private repositories (`ALL_COMMITS=true` uses the commit search API).
-    - **Fine-grained PAT:** Resource owner = your user. Repository access = **All repositories**. Repository permission = **Metadata: Read-only**. Account permission = **Gists: Read and write**.
-      - Public repo metadata is included. Private stars/commits are only included for repositories this token can actually read.
-      - GraphQL may return `null` repository nodes plus an `errors` array for inaccessible repos or fields; those nodes are skipped and the action logs `type` / `path` / `message` only.
-      - A user-owned token cannot count organization-owned repositories (this query uses `ownerAffiliations: OWNER`).
-      - Commit search often does not work with fine-grained tokens. If `ALL_COMMITS=true` and search is forbidden, the gist uses last-year GraphQL totals and labels the line **Past Year Commits** instead of failing.
+    - **Classic PAT:** `gist` is required. Add `repo` only if you need stats from private repositories (`ALL_COMMITS=true` uses `GET /search/commits`).
+    - **Fine-grained PAT:** Resource owner = your user. Repository access = **All repositories**.
+      Every fine-grained token includes read-only access to **public** repositories. Extra repository permissions are required only for **private** resources ([permissions required for fine-grained personal access tokens](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens); [managing personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)).
+
+      Always required:
+
+      | Permission | Access | Used for |
+      | --- | --- | --- |
+      | **Metadata** (repository) | Read-only | Mandatory. Stars use GraphQL `stargazerCount` (REST equivalent: `GET /repos/{owner}/{repo}/stargazers/count`). |
+      | **Gists** (account) | Read and write | Update the pinned gist (`PATCH /gists/{gist_id}`). The token form only offers Gists as write (`gists=write`), which includes read. |
+
+      Add these **read-only** repository permissions to include **private** commits, PRs, and issues (public counts work without them):
+
+      | Permission | Access | Private data it includes |
+      | --- | --- | --- |
+      | **Contents** | Read-only | Private commits (`GET /repos/{owner}/{repo}/commits`). Needed so GraphQL `contributionsCollection` and `ALL_COMMITS` search can see commits in private repos. |
+      | **Pull requests** | Read-only | Private pull requests (`GET /repos/{owner}/{repo}/pulls`; GraphQL `viewer.pullRequests`). |
+      | **Issues** | Read-only | Private issues (`GET /repos/{owner}/{repo}/issues`). GraphQL uses the same `issues:read` permission to read issues in repositories the token can access ([forming GraphQL calls](https://docs.github.com/en/graphql/guides/forming-calls-with-graphql)). |
+
+      Without Contents / Pull requests / Issues, the gist still updates, but those three totals are public-only.
+
+      Other notes:
+
+      - Stars come from GraphQL `stargazerCount` (metadata). The `stargazers` connection is not queried: GitHub restricts that list, and because the field is non-null, a FORBIDDEN on it would null the whole repository node and drop the star count.
+      - Remaining GraphQL errors are logged as a compact count per type/message (no tokens, headers, env, or repository names). Null nodes, if any, are still skipped.
+      - A user-owned token cannot count organization-owned repositories (this query uses `ownerAffiliations: OWNER`). One fine-grained token can target only a single resource owner.
+      - `GET /search/commits` is [available to fine-grained tokens](https://docs.github.com/en/rest/authentication/endpoints-available-for-fine-grained-personal-access-tokens) but is **not** listed under Contents in the permissions table. Search [returns only repositories the token can access](https://docs.github.com/en/rest/search/search#access-errors-or-missing-search-results). If `ALL_COMMITS=true` and search is forbidden, the gist uses last-year GraphQL totals and labels the line **Past Year Commits** instead of failing.
 
 ## Project setup
 

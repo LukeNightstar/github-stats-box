@@ -77,11 +77,11 @@ describe('statsFromViewer', () => {
 });
 
 describe('formatGraphqlErrors', () => {
-    it('summarizes message, type, and path only', () => {
+    it('summarizes message, type, and collapsed path only', () => {
         const lines = formatGraphqlErrors([
             {
                 type: 'FORBIDDEN',
-                path: ['viewer', 'repositories', 'nodes', 1],
+                path: ['viewer', 'repositories', 'nodes', 1, 'stargazers'],
                 message: 'Resource not accessible by personal access token',
                 extensions: { saml_failure: false, authorization: 'Bearer SECRETVALUE' },
                 config: { headers: { Authorization: 'Bearer SECRETVALUE' } },
@@ -90,11 +90,25 @@ describe('formatGraphqlErrors', () => {
 
         assert.equal(lines.length, 1);
         assert.match(lines[0], /FORBIDDEN/);
-        assert.match(lines[0], /viewer\.repositories\.nodes\.1/);
+        assert.match(lines[0], /viewer\.repositories\.nodes\.N\.stargazers/);
+        assert.equal(lines[0].includes('nodes.1'), false);
         assert.match(lines[0], /Resource not accessible by personal access token/);
         assert.equal(lines[0].includes('SECRETVALUE'), false);
         assert.equal(lines[0].includes('Bearer'), false);
         assert.equal(lines[0].includes('authorization'), false);
+    });
+
+    it('groups identical FORBIDDEN stargazers errors instead of logging each node', () => {
+        const errors = Array.from({ length: 73 }, (_, i) => ({
+            type: 'FORBIDDEN',
+            path: ['viewer', 'repositories', 'nodes', i, 'stargazers'],
+            message: 'Resource not accessible by personal access token',
+        }));
+        const lines = formatGraphqlErrors(errors);
+        assert.equal(lines.length, 1);
+        assert.match(lines[0], /\(x73\)/);
+        assert.match(lines[0], /FORBIDDEN/);
+        assert.equal(lines.join('\n').includes('nodes.12'), false);
     });
 
     it('returns an empty list when errors are missing', () => {
