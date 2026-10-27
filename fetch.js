@@ -5,6 +5,8 @@ const TIMEOUT_MS = 30000;
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const RETRYABLE_CODES = new Set([
     'ECONNRESET',
+    'ECONNREFUSED',
+    'EHOSTUNREACH',
     'ETIMEDOUT',
     'EAI_AGAIN',
     'ENOTFOUND',
@@ -69,6 +71,9 @@ function redactAuthHeaders(error) {
             headers.authorization = '[redacted]';
         }
     }
+    if (error.request && typeof error.request._header === 'string') {
+        error.request._header = error.request._header.replace(/^Authorization:.*$/gim, 'Authorization: [redacted]');
+    }
 }
 
 function githubRequest(config, token) {
@@ -78,6 +83,7 @@ function githubRequest(config, token) {
             return await axios({
                 timeout: TIMEOUT_MS,
                 ...config,
+                redact: ['Authorization'],
                 headers: {
                     'User-Agent': 'github-stats-box',
                     ...(config.headers || {}),
