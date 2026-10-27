@@ -1,14 +1,103 @@
 const axios = require('axios');
 
+const MAX_ATTEMPTS = 3;
+const TIMEOUT_MS = 30000;
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const RETRYABLE_CODES = new Set([
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'EAI_AGAIN',
+    'ENOTFOUND',
+    'ECONNABORTED',
+    'ERR_NETWORK',
+    'ERR_BAD_RESPONSE',
+]);
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function describeError(error) {
+    const status = error.response && error.response.status;
+    if (status) {
+        return `HTTP ${status}`;
+    }
+    return error.code || 'error';
+}
+
+function isRetryable(error) {
+    const status = error.response && error.response.status;
+    if (status && RETRYABLE_STATUS.has(status)) {
+        return true;
+    }
+    return Boolean(error.code && RETRYABLE_CODES.has(error.code));
+}
+
+async function withRetry(task, label) {
+    let lastError;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        try {
+            return await task();
+        } catch (error) {
+            lastError = error;
+            if (!isRetryable(error) || attempt === MAX_ATTEMPTS) {
+                throw error;
+            }
+            const delayMs = 15000 * attempt;
+            console.info(
+                `${label}: transient failure (${describeError(error)}); retrying in ${delayMs / 1000}s (attempt ${attempt}/${MAX_ATTEMPTS})`
+            );
+            await sleep(delayMs);
+        }
+    }
+    throw lastError;
+}
+
+function redactAuthHeaders(error) {
+    const headerSets = [];
+    if (error.config && error.config.headers) {
+        headerSets.push(error.config.headers);
+    }
+    if (error.response && error.response.config && error.response.config.headers) {
+        headerSets.push(error.response.config.headers);
+    }
+    for (const headers of headerSets) {
+        if (headers.Authorization) {
+            headers.Authorization = '[redacted]';
+        }
+        if (headers.authorization) {
+            headers.authorization = '[redacted]';
+        }
+    }
+}
+
+function githubRequest(config, token) {
+    const method = (config.method || 'get').toString().toUpperCase();
+    return withRetry(async () => {
+        try {
+            return await axios({
+                timeout: TIMEOUT_MS,
+                ...config,
+                headers: {
+                    'User-Agent': 'github-stats-box',
+                    ...(config.headers || {}),
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+        } catch (error) {
+            redactAuthHeaders(error);
+            throw error;
+        }
+    }, `${method} ${config.url}`);
+}
+
 const userInfoFetcher = (token) => {
-    return axios({
-        url: 'https://api.github.com/graphql',
-        method: 'post',
-        headers: {
-            Authorization: `bearer ${token}`,
-        },
-        data: {
-            query: `
+    return githubRequest(
+        {
+            url: 'https://api.github.com/graphql',
+            method: 'post',
+            data: {
+                query: `
               query userInfo {
                 viewer {
                   name
@@ -35,24 +124,29 @@ const userInfoFetcher = (token) => {
                   }
                 }
               }`,
+            },
         },
-    });
+        token
+    );
 };
 
 // Experimental API
 const totalCommitsFetcher = async (login, token) => {
-    return axios({
-        method: 'get',
-        url: `https://api.github.com/search/commits?q=author:${login}`,
-        headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/vnd.github.cloak-preview',
-            Authorization: `bearer ${token}`,
+    return githubRequest(
+        {
+            method: 'get',
+            url: `https://api.github.com/search/commits?q=author:${login}`,
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/vnd.github.cloak-preview',
+            },
         },
-    }).then((res) => res.data.total_count);
+        token
+    ).then((res) => res.data.total_count);
 };
 
 module.exports = {
     userInfoFetcher,
     totalCommitsFetcher,
+    githubRequest,
 };
