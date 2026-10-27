@@ -16,8 +16,9 @@
     - **Classic PAT:** `gist` is required. Add `repo` only if you need to count commits in private repositories (`ALL_COMMITS=true` uses the commit search API).
     - **Fine-grained PAT:** Resource owner = your user. Repository access = **All repositories**. Repository permission = **Metadata: Read-only**. Account permission = **Gists: Read and write**.
       - Public repo metadata is included. Private stars/commits are only included for repositories this token can actually read.
-      - A user-owned token cannot see organization-owned repos; those GraphQL nodes may be `null` and are skipped (the action logs the GraphQL `errors` summary).
-      - Commit search often does not work with fine-grained tokens. If `ALL_COMMITS=true` and search is forbidden, the action falls back to last-year GraphQL commit totals instead of failing.
+      - GraphQL may return `null` repository nodes plus an `errors` array for inaccessible repos or fields; those nodes are skipped and the action logs `type` / `path` / `message` only.
+      - A user-owned token cannot count organization-owned repositories (this query uses `ownerAffiliations: OWNER`).
+      - Commit search often does not work with fine-grained tokens. If `ALL_COMMITS=true` and search is forbidden, the gist uses last-year GraphQL totals and labels the line **Past Year Commits** instead of failing.
 
 ## Project setup
 

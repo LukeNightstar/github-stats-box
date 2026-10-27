@@ -3,7 +3,7 @@
 
 require('dotenv').config();
 const { userInfoFetcher, totalCommitsFetcher, githubRequest, isRetryableFailure, describeError } = require('./fetch');
-const { statsFromViewer, formatGraphqlErrors, NonRetryableError } = require('./stats');
+const { statsFromViewer, formatGraphqlErrors, viewerFromPayload, NonRetryableError } = require('./stats');
 const numeral = require('numeral');
 
 const gistId = process.env.GIST_ID;
@@ -45,18 +45,20 @@ async function getStats() {
         }
     }
 
-    const viewer = payload && payload.data && payload.data.viewer;
+    const viewer = viewerFromPayload(payload);
     const stats = statsFromViewer(viewer);
     if (stats.skippedRepos > 0) {
         console.info(`Skipped ${stats.skippedRepos} inaccessible repository node(s) when summing stars`);
     }
 
+    let commitsAreAllTime = false;
     if (countAllCommits) {
         if (!stats.login) {
             console.info('commit search skipped: viewer login is missing');
         } else {
             try {
                 stats.totalCommits = await totalCommitsFetcher(stats.login, githubToken);
+                commitsAreAllTime = true;
             } catch (error) {
                 if (isRetryableFailure(error)) {
                     throw error;
@@ -76,6 +78,7 @@ async function getStats() {
         totalStars: stats.totalStars,
         contributedTo: stats.contributedTo,
         skippedRepos: stats.skippedRepos,
+        commitsAreAllTime,
     };
 }
 
@@ -85,7 +88,7 @@ async function updateGist(stats) {
     const gistContent =
         [
             ['⭐', `Total Stars`, humanize(stats.totalStars)],
-            ['➕', countAllCommits ? 'Total Commits' : 'Past Year Commits', humanize(stats.totalCommits)],
+            ['➕', stats.commitsAreAllTime ? 'Total Commits' : 'Past Year Commits', humanize(stats.totalCommits)],
             ['🔀', `Total PRs`, humanize(stats.totalPRs)],
             ['🚩', `Total Issues`, humanize(stats.totalIssues)],
             ['📦', `Contributed to`, humanize(stats.contributedTo)],

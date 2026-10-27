@@ -62,7 +62,7 @@ async function withRetry(task, label) {
             return await task();
         } catch (error) {
             lastError = error;
-            if (!isRetryable(error) || attempt === MAX_ATTEMPTS) {
+            if (!isRetryableFailure(error) || attempt === MAX_ATTEMPTS) {
                 throw error;
             }
             const delayMs = 15000 * attempt;

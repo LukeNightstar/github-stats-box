@@ -25,5 +25,13 @@ describe('isRetryableFailure', () => {
         const wrapped = new Error("cannot retrieve statistics: Cannot read properties of null (reading 'stargazers')");
         wrapped.cause = new TypeError("Cannot read properties of null (reading 'stargazers')");
         assert.equal(isRetryableFailure(wrapped), false);
+
+        const wrappedFatal = new Error('cannot retrieve statistics: GraphQL viewer is missing');
+        wrappedFatal.cause = new NonRetryableError('GraphQL viewer is missing');
+        assert.equal(isRetryableFailure(wrappedFatal), false);
+
+        const wrappedTransient = new Error('cannot retrieve statistics: GraphQL viewer is missing');
+        wrappedTransient.cause = Object.assign(new Error('GraphQL viewer is missing'), { retryable: true });
+        assert.equal(isRetryableFailure(wrappedTransient), true);
     });
 });

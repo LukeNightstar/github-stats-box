@@ -56,6 +56,39 @@ function statsFromViewer(viewer) {
     };
 }
 
+const TRANSIENT_GRAPHQL_TYPES = new Set(['RATE_LIMITED', 'INTERNAL', 'TIMEOUT']);
+
+function isTransientGraphql(errors) {
+    return (
+        Array.isArray(errors) &&
+        errors.some((err) => err && typeof err.type === 'string' && TRANSIENT_GRAPHQL_TYPES.has(err.type))
+    );
+}
+
+function safeGraphqlMessage(message) {
+    let text = typeof message === 'string' ? message : 'unknown';
+    text = text.replace(/ghp_[A-Za-z0-9]+/g, 'ghp_[redacted]');
+    text = text.replace(/github_pat_[A-Za-z0-9_]+/g, 'github_pat_[redacted]');
+    text = text.replace(/gho_[A-Za-z0-9]+/g, 'gho_[redacted]');
+    if (text.length > 200) {
+        text = `${text.slice(0, 200)}…`;
+    }
+    return text;
+}
+
+function viewerFromPayload(payload) {
+    const viewer = payload && payload.data && payload.data.viewer;
+    if (viewer && typeof viewer === 'object') {
+        return viewer;
+    }
+    if (isTransientGraphql(payload && payload.errors)) {
+        const error = new Error('GraphQL viewer is missing');
+        error.retryable = true;
+        throw error;
+    }
+    throw new NonRetryableError('GraphQL viewer is missing');
+}
+
 function formatGraphqlErrors(errors, { limit = 25 } = {}) {
     if (!Array.isArray(errors) || errors.length === 0) {
         return [];
@@ -66,7 +99,7 @@ function formatGraphqlErrors(errors, { limit = 25 } = {}) {
             return 'unknown GraphQL error';
         }
         const type = typeof err.type === 'string' ? err.type : '';
-        const message = typeof err.message === 'string' ? err.message : 'unknown';
+        const message = safeGraphqlMessage(err.message);
         const path = Array.isArray(err.path)
             ? err.path.filter((part) => typeof part === 'string' || typeof part === 'number').join('.')
             : '';
@@ -84,4 +117,6 @@ module.exports = {
     NonRetryableError,
     statsFromViewer,
     formatGraphqlErrors,
+    viewerFromPayload,
+    isTransientGraphql,
 };

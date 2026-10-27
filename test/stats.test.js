@@ -2,7 +2,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { statsFromViewer, formatGraphqlErrors, NonRetryableError } = require('../stats');
+const { statsFromViewer, formatGraphqlErrors, viewerFromPayload, NonRetryableError } = require('../stats');
 
 describe('statsFromViewer', () => {
     it('documents the production TypeError when a repository node is null', () => {
@@ -101,5 +101,39 @@ describe('formatGraphqlErrors', () => {
         assert.deepEqual(formatGraphqlErrors(undefined), []);
         assert.deepEqual(formatGraphqlErrors(null), []);
         assert.deepEqual(formatGraphqlErrors([]), []);
+    });
+
+    it('redacts token-like prefixes in GraphQL messages', () => {
+        const marker = 'ghp_' + 'REDACTMEINTESTONLY12345';
+        const lines = formatGraphqlErrors([{ type: 'FORBIDDEN', message: `denied ${marker}` }]);
+        assert.equal(lines[0].includes(marker), false);
+        assert.match(lines[0], /ghp_\[redacted\]/);
+    });
+});
+
+describe('viewerFromPayload', () => {
+    it('returns the viewer when present even if some repo nodes are null', () => {
+        const viewer = viewerFromPayload({
+            data: { viewer: { login: 'octocat', repositories: { nodes: [null] } } },
+            errors: [{ type: 'FORBIDDEN', message: 'Resource not accessible by personal access token' }],
+        });
+        assert.equal(viewer.login, 'octocat');
+    });
+
+    it('throws non-retryable when viewer is missing', () => {
+        assert.throws(
+            () => viewerFromPayload({ data: { viewer: null }, errors: [{ type: 'FORBIDDEN', message: 'nope' }] }),
+            NonRetryableError
+        );
+    });
+
+    it('throws retryable when viewer is missing due to RATE_LIMITED', () => {
+        try {
+            viewerFromPayload({ data: { viewer: null }, errors: [{ type: 'RATE_LIMITED', message: 'wait' }] });
+            assert.fail('expected throw');
+        } catch (error) {
+            assert.equal(error.retryable, true);
+            assert.equal(error instanceof NonRetryableError, false);
+        }
     });
 });
