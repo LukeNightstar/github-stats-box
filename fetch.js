@@ -117,13 +117,10 @@ function githubRequest(config, token) {
     }, `${method} ${config.url}`);
 }
 
-const userInfoFetcher = (token) => {
-    return githubRequest(
-        {
-            url: 'https://api.github.com/graphql',
-            method: 'post',
-            data: {
-                query: `
+// stargazers is StargazerConnection! — a FORBIDDEN on that field nulls the whole
+// Repository node (and drops stargazerCount). Fine-grained PATs with Metadata
+// read can still read the stargazerCount scalar.
+const USER_INFO_QUERY = `
               query userInfo {
                 viewer {
                   name
@@ -144,13 +141,18 @@ const userInfoFetcher = (token) => {
                     totalCount
                     nodes {
                       stargazerCount
-                      stargazers {
-                        totalCount
-                      }
                     }
                   }
                 }
-              }`,
+              }`;
+
+const userInfoFetcher = (token) => {
+    return githubRequest(
+        {
+            url: 'https://api.github.com/graphql',
+            method: 'post',
+            data: {
+                query: USER_INFO_QUERY,
             },
         },
         token
@@ -173,6 +175,7 @@ const totalCommitsFetcher = async (login, token) => {
 };
 
 module.exports = {
+    USER_INFO_QUERY,
     userInfoFetcher,
     totalCommitsFetcher,
     githubRequest,
